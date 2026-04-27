@@ -1,0 +1,9 @@
+[project]
+name = "vkr-puml"
+version = "0.1.0"
+description = "Desktop MVP for PlantUML architecture integrity analysis"
+requires-python = ">=3.13"
+dependencies = ["PySide6>=6.7"]
+
+[tool.setuptools]
+py-modules = []
