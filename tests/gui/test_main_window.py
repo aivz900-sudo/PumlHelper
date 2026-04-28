@@ -2,15 +2,18 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QComboBox
 
 from app.application.services.analysis_service import AnalysisService
+from app.application.services.git_import_service import GitImportService
 from app.application.services.preview_service import DiagramPreviewService, PreviewKind
 from app.domain.project.models import DiagramType
 from app.infrastructure.filesystem.file_reader import FileReader
+from app.infrastructure.git.repository_loader import GitRepositorySnapshot
 from app.infrastructure.rendering.backends import RendererBackend, RenderRequest, RenderedPreview
 from app.presentation.main_window import MainWindow
 
@@ -28,7 +31,13 @@ class MainWindowRegressionTests(unittest.TestCase):
             file_reader=FileReader(),
             backend=UnavailableBackend(),
         )
-        self.window = MainWindow(self.service, self.preview_service)
+        self.git_import_service = GitImportService(
+            analysis_service=self.service,
+            repository_loader=FakeRepositoryLoader(
+                GitRepositorySnapshot(repository_path=str(self.root), puml_paths=[])
+            ),
+        )
+        self.window = MainWindow(self.service, self.preview_service, self.git_import_service)
 
     def tearDown(self) -> None:
         self.window.close()
@@ -106,6 +115,49 @@ class MainWindowRegressionTests(unittest.TestCase):
         self.assertEqual(dialog.preview.kind, PreviewKind.TEXT)
         self.assertIn("UserService", dialog.preview.text)
 
+    def test_load_from_git_refreshes_table_and_allows_removing_imported_files(self) -> None:
+        class_path = self._write_file(
+            "class.puml",
+            """
+            @startuml
+            class UserService
+            @enduml
+            """,
+        )
+        extra_path = self._write_file(
+            "extra.puml",
+            """
+            @startuml
+            class Extra
+            @enduml
+            """,
+        )
+        self.git_import_service = GitImportService(
+            analysis_service=self.service,
+            repository_loader=FakeRepositoryLoader(
+                GitRepositorySnapshot(
+                    repository_path=str(self.root),
+                    puml_paths=[class_path, extra_path],
+                )
+            ),
+        )
+        self.window.close()
+        self.window = MainWindow(self.service, self.preview_service, self.git_import_service)
+
+        with patch(
+            "app.presentation.main_window.QInputDialog.getText",
+            return_value=("https://example.com/project/repo.git", True),
+        ):
+            self.window._load_from_git()
+
+        self.assertEqual(self.window._documents_table.rowCount(), 2)
+
+        self.window._documents_table.selectRow(1)
+        self.window._remove_selected()
+
+        self.assertEqual(self.window._documents_table.rowCount(), 1)
+        self.assertEqual(self.window._documents_table.item(0, 0).text(), "class.puml")
+
 
 class UnavailableBackend(RendererBackend):
     def render(self, request: RenderRequest) -> RenderedPreview:
@@ -114,6 +166,14 @@ class UnavailableBackend(RendererBackend):
             image_path=None,
             error_message="Renderer is unavailable.",
         )
+
+
+class FakeRepositoryLoader:
+    def __init__(self, snapshot: GitRepositorySnapshot) -> None:
+        self.snapshot = snapshot
+
+    def load_repository(self, repository_url: str) -> GitRepositorySnapshot:
+        return self.snapshot
 
 
 if __name__ == "__main__":

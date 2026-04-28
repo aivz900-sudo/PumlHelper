@@ -4,18 +4,20 @@
 
 ## 1. Назначение проекта
 
-Проект — Windows desktop-прототип для анализа целостности архитектурных описаний на PlantUML.
+Проект - Windows desktop-прототип для анализа целостности архитектурных описаний на PlantUML.
 
 Текущий фокус:
-- загрузка `.puml` файлов;
+- загрузка локальных `.puml` файлов;
+- загрузка `.puml` файлов из публичного HTTPS Git-репозитория;
 - ручное назначение типа диаграммы;
 - построение общей модели проекта;
 - базовый анализ согласованности между class и sequence;
-- формирование отчёта;
+- формирование отчета;
 - preview диаграммы внутри приложения.
 
 Что еще не реализовано:
 - persistence project file между запусками;
+- приватные Git-репозитории, SSH, токены и выбор ветки в Git-загрузке;
 - полный набор правил валидации для всех типов диаграмм;
 - полноценная упаковка в `.exe`.
 
@@ -25,6 +27,7 @@
 - GUI: PySide6
 - Тесты: `unittest`
 - Рендер preview: PlantUML + Graphviz
+- Git-загрузка: системный `git.exe` через `subprocess`
 - Локальный launcher: `run_app.bat`
 
 См. [pyproject.toml](./pyproject.toml).
@@ -42,6 +45,7 @@
   - orchestration/use-case services
   - анализ: `app/application/services/analysis_service.py`
   - preview: `app/application/services/preview_service.py`
+  - Git-импорт: `app/application/services/git_import_service.py`
 
 - `app/domain/`
   - независимое аналитическое ядро
@@ -53,8 +57,9 @@
 
 - `app/infrastructure/`
   - файловое чтение: `app/infrastructure/filesystem/file_reader.py`
-  - экспорт отчёта: `app/infrastructure/export/report_exporter.py`
+  - экспорт отчета: `app/infrastructure/export/report_exporter.py`
   - bundled renderer backend: `app/infrastructure/rendering/backends.py`
+  - Git adapter: `app/infrastructure/git/repository_loader.py`
 
 - `app/bootstrap/`
   - фабрика зависимостей и entrypoint:
@@ -71,6 +76,10 @@
   - `tools/plantuml/plantuml.jar`
   - `tools/graphviz/.../bin/dot.exe`
 
+- `.vkr_puml_git_cache/`
+  - runtime cache для свежих clone Git-репозиториев
+  - директория игнорируется git-ом и не должна попадать в коммиты/дистрибутив как исходный код проекта
+
 ## 4. Архитектурные принципы
 
 ### 4.1 Layered подход
@@ -79,34 +88,36 @@
 
 - `presentation`
   - только UI
-  - не должен содержать правил анализа
+  - не должен содержать правил анализа, Git clone-логики или renderer-логики
 
 - `application`
   - координация сценариев
+  - связывает UI/use-case с domain и infrastructure
   - не должен содержать доменную логику правил
 
 - `domain`
   - ядро анализа
-  - не должно зависеть от PySide6, renderer и persistence
+  - не должно зависеть от PySide6, renderer, Git или persistence
 
 - `infrastructure`
-  - адаптеры к файловой системе, renderer, export
+  - адаптеры к файловой системе, renderer, export и системному Git
 
 ### 4.2 Реальный приоритет проекта
 
 Главный приоритет текущей реализации:
 - сначала аналитическое ядро;
 - затем preview;
+- затем удобные источники загрузки диаграмм, включая Git;
 - persistence пока не добавлен.
 
 Если меняешь проект, не размывай это разделение без явной причины.
 
 ## 5. Что сейчас реально реализовано
 
-### 5.1 Загрузка и проектная модель
+### 5.1 Загрузка локальных файлов и проектная модель
 
 Поддерживается:
-- загрузка нескольких `.puml`;
+- загрузка нескольких локальных `.puml`;
 - удаление файлов из текущей сессии;
 - назначение типа диаграммы через GUI;
 - статус файла:
@@ -116,8 +127,42 @@
 
 Источник истины:
 - `app/domain/project/models.py`
+- `app/application/services/analysis_service.py`
 
-### 5.2 Поддерживаемые типы диаграмм
+### 5.2 Загрузка диаграмм из Git
+
+Git-загрузка уже реализована как MVP.
+
+Поведение:
+- пользователь нажимает `Загрузить из Git`;
+- вводит публичный HTTPS URL Git-репозитория;
+- приложение вычисляет стабильную cache-папку `.vkr_puml_git_cache/<url_hash>/`;
+- при каждой загрузке этого URL приложение удаляет соответствующую cache-папку и делает свежий `git clone`;
+- `pull`, `fetch`, `reset`, merge-обновление и выбор ветки не используются;
+- после clone приложение рекурсивно находит все `.puml`;
+- найденные файлы загружаются в обычную таблицу документов;
+- типы диаграмм пользователь назначает вручную;
+- лишние найденные файлы пользователь удаляет из текущей сессии через существующую кнопку `Удалить`.
+
+Ограничения:
+- поддерживаются только публичные HTTPS URL;
+- SSH, приватные репозитории, токены и пароли в UI не поддерживаются;
+- branch selector не реализован, используется default branch репозитория;
+- отдельного диалога выбора найденных `.puml` нет;
+- Git должен быть доступен как системная команда `git`.
+
+Ключевые файлы:
+- `app/application/services/git_import_service.py`
+- `app/infrastructure/git/repository_loader.py`
+- `app/presentation/main_window.py`
+- `app/bootstrap/app_factory.py`
+
+Практически важно:
+- Git-адаптер перед удалением проверяет, что удаляемая директория находится внутри `.vkr_puml_git_cache`;
+- cache-директория добавлена в `.gitignore`;
+- Git-логика не должна переезжать в `domain`.
+
+### 5.3 Поддерживаемые типы диаграмм
 
 В enum перечислены все типы из требований, но в анализе сейчас реально подключены только:
 - `CLASS`
@@ -126,7 +171,7 @@
 Подключение parser-ов см. в:
 - `app/application/services/analysis_service.py`
 
-### 5.3 Парсинг
+### 5.4 Парсинг
 
 Сейчас реализованы:
 - `ClassDiagramParser`
@@ -136,22 +181,22 @@
 - `app/domain/parsing/parsers.py`
 
 Lexer:
-- есть упрощённый построчный lexer в `app/domain/parsing/lexer.py`
+- есть упрощенный построчный lexer в `app/domain/parsing/lexer.py`
 - он используется как внутренний этап parser pipeline
 
-### 5.4 Merge
+### 5.5 Merge
 
 Текущая merge-логика:
 - объединение class-диаграмм в общую модель;
 - merge новых атрибутов и новых операций;
 - `merge conflict` при одинаковом имени метода и разной сигнатуре;
-- `duplicate declaration warning`, если класс повторён без новых данных;
+- `duplicate declaration warning`, если класс повторен без новых данных;
 - skeleton + full class считается допустимым дополнением.
 
 Источник истины:
 - `app/domain/merge/merger.py`
 
-### 5.5 Validation rules
+### 5.6 Validation rules
 
 Сейчас реально включены только два правила:
 
@@ -166,9 +211,9 @@ Lexer:
 
 Не предполагается, что остальные проверки уже есть только потому, что они были в плане.
 
-### 5.6 Report
+### 5.7 Report
 
-Есть текстовый отчёт с:
+Есть текстовый отчет с:
 - summary;
 - errors;
 - warnings;
@@ -179,7 +224,7 @@ Lexer:
 - `app/domain/reporting/models.py`
 - `app/infrastructure/export/report_exporter.py`
 
-### 5.7 Preview
+### 5.8 Preview
 
 Preview уже реализован.
 
@@ -193,7 +238,7 @@ Preview уже реализован.
 - `app/presentation/dialogs/preview_dialog.py`
 - `app/infrastructure/rendering/backends.py`
 
-## 6. Bundled tools и preview “из коробки”
+## 6. Bundled tools и preview "из коробки"
 
 Preview спроектирован так, чтобы работать без настройки системного `PATH`, если рядом с проектом есть `tools/`.
 
@@ -218,7 +263,7 @@ Preview спроектирован так, чтобы работать без н
 
 Важно:
 - preview сейчас зависит от содержимого папки `tools/`
-- если дистрибутив отдаётся пользователю, папка `tools/` должна ехать вместе с приложением
+- если дистрибутив отдается пользователю, папка `tools/` должна ехать вместе с приложением
 
 ## 7. Запуск проекта
 
@@ -242,6 +287,8 @@ Launcher:
 python -m app.bootstrap.entrypoint
 ```
 
+Для Git-загрузки дополнительно нужен установленный и доступный из процесса `git`.
+
 ## 8. Тесты и обязательная проверка
 
 Основной тестовый набор:
@@ -249,9 +296,11 @@ python -m app.bootstrap.entrypoint
 - unit:
   - `tests/unit/test_domain_core.py`
   - `tests/unit/test_preview_service.py`
+  - `tests/unit/test_git_repository_loader.py`
 
 - integration:
   - `tests/integration/test_analysis_flow.py`
+  - `tests/integration/test_git_import_flow.py`
 
 - gui:
   - `tests/gui/test_main_window.py`
@@ -265,20 +314,32 @@ python -m compileall app tests
 
 Если менялся preview, дополнительно полезно проверить реальный вызов preview service, а не только моки/двойники.
 
+Если менялась Git-загрузка, проверь:
+- HTTPS URL validation;
+- стратегию `delete cache dir -> fresh git clone`;
+- запрет удаления вне `.vkr_puml_git_cache`;
+- рекурсивный поиск `.puml`;
+- GUI-сценарий загрузки и удаления лишних импортированных строк.
+
 ## 9. Известные ограничения
 
 - Persistence project file пока отсутствует.
 - Реальный анализ реализован только для class + sequence.
-- Формально в GUI есть список всех типов диаграмм, но parser-и не реализованы для большинства из них.
+- Формально в GUI есть список всех типов диаграмм, но parser-ы не реализованы для большинства из них.
+- Git-загрузка поддерживает только публичные HTTPS репозитории.
+- Git-загрузка импортирует все найденные `.puml` рекурсивно; фильтр по подпапке и диалог выбора файлов пока отсутствуют.
+- Git-загрузка не поддерживает SSH, токены, приватные репозитории и выбор ветки.
 - Нет packaging-сборки в `.exe`.
-- Проект сейчас не находится в git-репозитории. Не предполагай наличие веток, commit history или worktree.
 
 ## 10. Практические правила для следующих агентов
 
-- Не утверждай, что “тип диаграммы поддержан”, если для него нет parser-а и semantic pipeline.
+- Не утверждай, что "тип диаграммы поддержан", если для него нет parser-а и semantic pipeline.
 - Не добавляй бизнес-логику в GUI-слой.
 - Не встраивай renderer-логику в domain.
+- Не встраивай Git clone/update-логику в domain.
 - Не ломай bundled-tools сценарий preview.
+- Не меняй стратегию Git update на `pull`/`fetch`/`reset` без явного решения: текущий MVP намеренно использует удаление cache-папки и свежий clone.
+- Если меняешь удаление cache-папок, сохраняй защиту: удалять можно только директории внутри `.vkr_puml_git_cache`.
 - Если меняешь статус/таблицу файлов в GUI, учитывай уже исправленный баг:
   - нельзя бездумно пересобирать всю таблицу из обработчика `QComboBox`, это уже приводило к артефактам строк и неправильному статусу.
 - Если меняешь русские строки UI, проверяй отображение в реальном окне.
@@ -289,7 +350,8 @@ python -m compileall app tests
 Наиболее логичные продолжения проекта:
 
 1. добавить persistence project file;
-2. расширить validation rules;
-3. добавить parser-ы для других типов диаграмм;
-4. подготовить packaging в `.exe` с включением `tools/`;
-5. нормализовать пользовательские русские строки и проверить кодировку UI по всему проекту.
+2. добавить фильтр/выбор файлов для Git-импорта;
+3. расширить validation rules;
+4. добавить parser-ы для других типов диаграмм;
+5. подготовить packaging в `.exe` с включением `tools/`;
+6. нормализовать пользовательские русские строки и проверить кодировку UI по всему проекту.

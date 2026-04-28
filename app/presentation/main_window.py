@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.application.services.analysis_service import AnalysisService
+from app.application.services.git_import_service import GitImportService
 from app.application.services.preview_service import DiagramPreviewService
 from app.domain.project.models import DiagramType
 from app.presentation.dialogs.preview_dialog import DiagramPreviewDialog
@@ -32,10 +34,12 @@ class MainWindow(QMainWindow):
         self,
         analysis_service: AnalysisService,
         preview_service: DiagramPreviewService,
+        git_import_service: GitImportService | None = None,
     ) -> None:
         super().__init__()
         self._analysis_service = analysis_service
         self._preview_service = preview_service
+        self._git_import_service = git_import_service
         self._preview_dialog: DiagramPreviewDialog | None = None
         self.setWindowTitle("PlantUML Integrity Analyzer")
         self.resize(1100, 700)
@@ -77,6 +81,10 @@ class MainWindow(QMainWindow):
         load_button.clicked.connect(self._load_files)
         layout.addWidget(load_button)
 
+        load_git_button = QPushButton("Загрузить из Git")
+        load_git_button.clicked.connect(self._load_from_git)
+        layout.addWidget(load_git_button)
+
         remove_button = QPushButton("Удалить")
         remove_button.clicked.connect(self._remove_selected)
         layout.addWidget(remove_button)
@@ -109,6 +117,33 @@ class MainWindow(QMainWindow):
         self._analysis_service.load_files(paths)
         self._refresh_table()
         self._set_status(f"Загружено файлов: {len(paths)}")
+
+    def _load_from_git(self) -> None:
+        if self._git_import_service is None:
+            QMessageBox.critical(self, "Git", "Git loading service is unavailable.")
+            return
+
+        repository_url, accepted = QInputDialog.getText(
+            self,
+            "Загрузить из Git",
+            "HTTPS URL репозитория:",
+        )
+        if not accepted:
+            return
+
+        repository_url = repository_url.strip()
+        if not repository_url:
+            return
+
+        try:
+            result = self._git_import_service.load_from_git(repository_url)
+        except Exception as error:  # pragma: no cover - UI guard
+            QMessageBox.critical(self, "Ошибка загрузки из Git", str(error))
+            self._set_status("Загрузка из Git завершилась ошибкой.")
+            return
+
+        self._refresh_table()
+        self._set_status(f"Загружено из Git файлов: {len(result.imported_paths)}")
 
     def _remove_selected(self) -> None:
         selection_model = self._documents_table.selectionModel()
