@@ -1,0 +1,72 @@
+@startuml
+class Patient {
+  patientId: str
+  fullName: str
+  phone: str
+  +requestAppointment()
+  +confirmVisit()
+  +payInvoice()
+}
+
+class Doctor {
+  doctorId: str
+  specialization: str
+  +reviewSchedule()
+  +approveAppointment()
+}
+
+class Appointment {
+  appointmentId: str
+  status: str
+  +create()
+  +confirm()
+  +markCompleted()
+}
+
+class ScheduleService {
+  calendarId: str
+  +findAvailableSlot(doctorId, date)
+  +reservePublicSlot(slotId)
+  #reserveSlot(slotId)
+}
+
+class AppointmentService {
+  serviceId: str
+  +bookAppointment(patientId, doctorId)
+  +confirmAppointment(appointmentId)
+  +notifyBooking(appointmentId)
+}
+
+class NotificationService {
+  channel: str
+  +sendSms(patientId, text)
+  +sendEmail(patientId, text)
+}
+
+class BillingService {
+  billingId: str
+  +createInvoice(appointmentId)
+  +chargePatient(patientId, amount)
+  +applyStandardDiscount(patientId)
+  -recalculateBalance(patientId)
+  {abstract} calculateDiscount(patientId)
+}
+
+class InsuranceService {
+  providerCode: str
+  +verifyPolicy(patientId)
+  +submitClaim(invoiceId)
+}
+
+class MedicalRecordService {
+  recordStore: str
+  +openRecord(patientId)
+  +appendVisitNote(patientId, note)
+}
+
+class ClinicReception {
+  deskId: str
+  +registerPatient(patientId)
+  +routePatient(patientId)
+}
+@enduml

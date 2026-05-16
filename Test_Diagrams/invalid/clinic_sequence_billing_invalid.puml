@@ -1,0 +1,25 @@
+@startuml
+participant Patient
+participant ClinicReception
+participant AppointmentService
+participant ScheduleService
+participant Doctor
+participant Appointment
+participant BillingService
+participant InsuranceService
+participant MedicalRecordService
+participant NotificationService
+
+Patient -> AppointmentService: cancelAppointment(appointmentId)
+ClinicReception -> AppointmentService: confirmAppointment(appointmentId)
+AppointmentService -> ScheduleService: findAvailableSlot(doctorId, date)
+AppointmentService -> Doctor: approveAppointment()
+AppointmentService -> Appointment: markCompleted()
+AppointmentService -> MedicalRecordService: appendVisitNote(patientId, note)
+AppointmentService -> BillingService: createInvoice(appointmentId)
+AppointmentService -> BillingService: calculateDiscount(patientId)
+AppointmentService -> BillingService: recalculateBalance(patientId)
+BillingService -> InsuranceService: verifyPolicy(patientId)
+BillingService -> InsuranceService: submitClaim(invoiceId)
+NotificationService -> Patient: confirmVisit()
+@enduml

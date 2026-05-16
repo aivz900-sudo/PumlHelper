@@ -1,0 +1,23 @@
+@startuml
+class Patient {
+  patientId: str
+  fullName: str
+  phone: str
+  +requestAppointment()
+  +confirmVisit()
+  +payInvoice()
+}
+
+class AppointmentService {
+  +bookAppointment(patientId)
+  +rescheduleAppointment(appointmentId, newSlotId)
+}
+
+class BillingService {
+  +createInvoice(appointmentId, tariffCode)
+  +refundPatient(patientId, amount)
+}
+
+class Doctor {
+}
+@enduml

@@ -1,0 +1,20 @@
+@startuml
+class Patient {
+  email: str
+  +updateContactInfo(phone, email)
+}
+
+class AppointmentService {
+  +rescheduleAppointment(appointmentId, newSlotId)
+  +cancelAppointment(appointmentId)
+}
+
+class BillingService {
+  +refundPatient(patientId, amount)
+  +sendPaymentReceipt(invoiceId)
+}
+
+class Doctor {
+  +writePrescription(patientId)
+}
+@enduml

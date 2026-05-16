@@ -1,0 +1,25 @@
+@startuml
+participant Patient
+participant ClinicReception
+participant AppointmentService
+participant ScheduleService
+participant Doctor
+participant Appointment
+participant MedicalRecordService
+participant NotificationService
+participant BillingService
+participant InsuranceService
+
+Patient -> ClinicReception: registerPatient(patientId)
+ClinicReception -> MedicalRecordService: openRecord(patientId)
+Patient -> AppointmentService: bookAppointment(patientId, doctorId)
+AppointmentService -> ScheduleService: findAvailableSlot(doctorId, date)
+AppointmentService -> ScheduleService: reservePublicSlot(slotId)
+AppointmentService -> Doctor: reviewSchedule()
+Doctor -> Appointment: create()
+AppointmentService -> Appointment: confirm()
+AppointmentService -> NotificationService: sendSms(patientId, text)
+AppointmentService -> BillingService: createInvoice(appointmentId)
+BillingService -> InsuranceService: verifyPolicy(patientId)
+BillingService -> BillingService: recalculateBalance(patientId)
+@enduml
