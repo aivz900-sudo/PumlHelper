@@ -112,6 +112,75 @@ class AnalysisFlowIntegrationTests(unittest.TestCase):
 
         self.assertTrue(any(issue.entity_name == "logout" for issue in result.report.errors))
 
+    def test_abstract_operation_call_is_reported(self) -> None:
+        class_path = self._write_file(
+            "class.puml",
+            """
+            @startuml
+            class UserService {
+              {abstract} loadProfile()
+            }
+            class Client
+            @enduml
+            """,
+        )
+        sequence_path = self._write_file(
+            "sequence.puml",
+            """
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: loadProfile()
+            @enduml
+            """,
+        )
+
+        self.service.load_files([class_path, sequence_path])
+        self.service.assign_type(class_path, DiagramType.CLASS)
+        self.service.assign_type(sequence_path, DiagramType.SEQUENCE)
+
+        result = self.service.analyze()
+
+        self.assertTrue(
+            any(issue.rule_id == "abstract-operation-call" for issue in result.report.errors)
+        )
+
+    def test_operation_visibility_violation_is_reported(self) -> None:
+        class_path = self._write_file(
+            "class.puml",
+            """
+            @startuml
+            class UserService {
+              -resetToken()
+            }
+            class Client
+            @enduml
+            """,
+        )
+        sequence_path = self._write_file(
+            "sequence.puml",
+            """
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: resetToken()
+            @enduml
+            """,
+        )
+
+        self.service.load_files([class_path, sequence_path])
+        self.service.assign_type(class_path, DiagramType.CLASS)
+        self.service.assign_type(sequence_path, DiagramType.SEQUENCE)
+
+        result = self.service.analyze()
+
+        self.assertTrue(
+            any(
+                issue.rule_id == "operation-visibility-violation"
+                for issue in result.report.errors
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

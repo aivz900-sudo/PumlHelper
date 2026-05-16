@@ -4,7 +4,12 @@ from app.domain.merge.merger import MergeSeverity, ModelMerger
 from app.domain.parsing.parsers import ClassDiagramParser, SequenceDiagramParser
 from app.domain.project.models import DiagramDocument, DiagramType, DocumentStatus
 from app.domain.validation.engine import ValidationEngine
-from app.domain.validation.rules import MissingClassRule, MissingOperationRule
+from app.domain.validation.rules import (
+    AbstractOperationCallRule,
+    MissingClassRule,
+    MissingOperationRule,
+    OperationVisibilityRule,
+)
 
 
 class DiagramDocumentTests(unittest.TestCase):
@@ -40,6 +45,35 @@ class ClassDiagramParserTests(unittest.TestCase):
         self.assertEqual(class_node.name, "UserService")
         self.assertEqual(len(class_node.operations), 1)
         self.assertEqual(len(class_node.attributes), 1)
+
+    def test_parse_class_diagram_preserves_operation_visibility_and_abstract_marker(self) -> None:
+        parser = ClassDiagramParser()
+        source = """
+        @startuml
+        class UserService {
+          +login()
+          #refresh()
+          -resetToken()
+          ping()
+          {abstract} loadProfile()
+        }
+        @enduml
+        """
+        document = DiagramDocument(
+            path="class.puml",
+            source_text=source,
+            diagram_type=DiagramType.CLASS,
+        )
+
+        parsed = parser.parse(document)
+        operations = parsed.semantic_fragment.classes["UserService"].operations
+
+        self.assertEqual(operations["login"].visibility, "public")
+        self.assertEqual(operations["refresh"].visibility, "protected")
+        self.assertEqual(operations["resetToken"].visibility, "private")
+        self.assertEqual(operations["ping"].visibility, "unknown")
+        self.assertTrue(operations["loadProfile"].is_abstract)
+        self.assertEqual(operations["loadProfile"].visibility, "unknown")
 
 
 class SequenceDiagramParserTests(unittest.TestCase):
@@ -224,6 +258,148 @@ class ValidationTests(unittest.TestCase):
         issues = ValidationEngine([MissingClassRule(), MissingOperationRule()]).validate(model)
 
         self.assertTrue(any(issue.entity_name == "logout" for issue in issues))
+
+    def test_abstract_operation_call_rule_reports_sequence_call_to_abstract_operation(self) -> None:
+        model = self._build_model(
+            class_source="""
+            @startuml
+            class UserService {
+              {abstract} loadProfile()
+            }
+            class Client
+            @enduml
+            """,
+            sequence_source="""
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: loadProfile()
+            @enduml
+            """,
+        )
+
+        issues = ValidationEngine([AbstractOperationCallRule()]).validate(model)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule_id, "abstract-operation-call")
+        self.assertEqual(issues[0].entity_name, "loadProfile")
+
+    def test_operation_visibility_rule_reports_private_or_protected_external_call(self) -> None:
+        model = self._build_model(
+            class_source="""
+            @startuml
+            class UserService {
+              -resetToken()
+              #refresh()
+            }
+            class Client
+            @enduml
+            """,
+            sequence_source="""
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: resetToken()
+            client -> service: refresh()
+            @enduml
+            """,
+        )
+
+        issues = ValidationEngine([OperationVisibilityRule()]).validate(model)
+
+        self.assertEqual(len(issues), 2)
+        self.assertTrue(all(issue.rule_id == "operation-visibility-violation" for issue in issues))
+        self.assertEqual({issue.entity_name for issue in issues}, {"resetToken", "refresh"})
+
+    def test_operation_visibility_rule_allows_public_external_call(self) -> None:
+        model = self._build_model(
+            class_source="""
+            @startuml
+            class UserService {
+              +login()
+            }
+            class Client
+            @enduml
+            """,
+            sequence_source="""
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: login()
+            @enduml
+            """,
+        )
+
+        issues = ValidationEngine([OperationVisibilityRule()]).validate(model)
+
+        self.assertEqual(issues, [])
+
+    def test_operation_visibility_rule_allows_private_or_protected_self_call(self) -> None:
+        model = self._build_model(
+            class_source="""
+            @startuml
+            class UserService {
+              -resetToken()
+              #refresh()
+            }
+            @enduml
+            """,
+            sequence_source="""
+            @startuml
+            participant service:UserService
+            service -> service: resetToken()
+            service -> service: refresh()
+            @enduml
+            """,
+        )
+
+        issues = ValidationEngine([OperationVisibilityRule()]).validate(model)
+
+        self.assertEqual(issues, [])
+
+    def test_operation_visibility_rule_ignores_unknown_visibility(self) -> None:
+        model = self._build_model(
+            class_source="""
+            @startuml
+            class UserService {
+              ping()
+            }
+            class Client
+            @enduml
+            """,
+            sequence_source="""
+            @startuml
+            participant client:Client
+            participant service:UserService
+            client -> service: ping()
+            @enduml
+            """,
+        )
+
+        issues = ValidationEngine([OperationVisibilityRule()]).validate(model)
+
+        self.assertEqual(issues, [])
+
+    def _build_model(self, class_source: str, sequence_source: str):
+        class_parser = ClassDiagramParser()
+        sequence_parser = SequenceDiagramParser()
+        merger = ModelMerger()
+        class_doc = DiagramDocument(
+            path="class.puml",
+            source_text=class_source,
+            diagram_type=DiagramType.CLASS,
+        )
+        sequence_doc = DiagramDocument(
+            path="sequence.puml",
+            source_text=sequence_source,
+            diagram_type=DiagramType.SEQUENCE,
+        )
+        return merger.merge(
+            [
+                class_parser.parse(class_doc).semantic_fragment,
+                sequence_parser.parse(sequence_doc).semantic_fragment,
+            ]
+        )
 
 
 if __name__ == "__main__":

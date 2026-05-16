@@ -16,6 +16,8 @@ class DocumentRef:
 class OperationModel:
     name: str
     signature_repr: str
+    visibility: str = "unknown"
+    is_abstract: bool = False
 
 
 @dataclass(slots=True)

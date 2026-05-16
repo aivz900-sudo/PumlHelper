@@ -6,7 +6,12 @@ from app.domain.merge.merger import ModelMerger
 from app.domain.project.models import DiagramDocument, DiagramType, Project
 from app.domain.reporting.models import ValidationReport
 from app.domain.validation.engine import ValidationEngine
-from app.domain.validation.rules import MissingClassRule, MissingOperationRule
+from app.domain.validation.rules import (
+    AbstractOperationCallRule,
+    MissingClassRule,
+    MissingOperationRule,
+    OperationVisibilityRule,
+)
 from app.infrastructure.export.report_exporter import ReportExporter
 from app.infrastructure.filesystem.file_reader import FileReader
 from app.domain.parsing.parsers import ClassDiagramParser, DiagramParser, SequenceDiagramParser
@@ -33,7 +38,12 @@ class AnalysisService:
         }
         self._merger = ModelMerger()
         self._validation_engine = ValidationEngine(
-            [MissingClassRule(), MissingOperationRule()]
+            [
+                MissingClassRule(),
+                MissingOperationRule(),
+                AbstractOperationCallRule(),
+                OperationVisibilityRule(),
+            ]
         )
 
     @property

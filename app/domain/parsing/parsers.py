@@ -28,7 +28,10 @@ from app.domain.semantics.models import (
 
 CLASS_HEADER_RE = re.compile(r"^class\s+(?P<name>[A-Za-z_]\w*)(?:\s*\{)?$")
 ATTRIBUTE_RE = re.compile(r"^[+#~-]?\s*(?P<name>[A-Za-z_]\w*)\s*:")
-OPERATION_RE = re.compile(r"^[+#~-]?\s*(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^)]*)\)")
+OPERATION_RE = re.compile(
+    r"^(?P<visibility>[+#~-])?\s*(?P<abstract>\{abstract\}\s*)?"
+    r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^)]*)\)"
+)
 PARTICIPANT_RE = re.compile(
     r"^(participant|actor|boundary|control|entity)\s+(?P<value>[A-Za-z_]\w*(?::[A-Za-z_]\w*)?)$"
 )
@@ -83,7 +86,16 @@ class ClassDiagramParser(DiagramParser):
                     if operation_match:
                         operation_name = operation_match.group("name")
                         signature = f"{operation_name}({operation_match.group('params').strip()})"
-                        operations.append(OperationNode(name=operation_name, signature_repr=signature))
+                        operations.append(
+                            OperationNode(
+                                name=operation_name,
+                                signature_repr=signature,
+                                visibility=self._parse_visibility(
+                                    operation_match.group("visibility")
+                                ),
+                                is_abstract=operation_match.group("abstract") is not None,
+                            )
+                        )
                     elif attribute_match:
                         attributes.append(
                             AttributeNode(
@@ -110,6 +122,8 @@ class ClassDiagramParser(DiagramParser):
                     operation.name: OperationModel(
                         name=operation.name,
                         signature_repr=operation.signature_repr,
+                        visibility=operation.visibility,
+                        is_abstract=operation.is_abstract,
                     )
                     for operation in class_node.operations
                 },
@@ -129,6 +143,14 @@ class ClassDiagramParser(DiagramParser):
             source_map=source_map,
         )
         return ParsedDiagram(diagram_type=DiagramType.CLASS, ast=ast, semantic_fragment=fragment)
+
+    @staticmethod
+    def _parse_visibility(marker: str | None) -> str:
+        return {
+            "+": "public",
+            "#": "protected",
+            "-": "private",
+        }.get(marker or "", "unknown")
 
 
 class SequenceDiagramParser(DiagramParser):
