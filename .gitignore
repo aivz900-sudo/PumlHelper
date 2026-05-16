@@ -9,3 +9,4 @@ venv/
 *.tmp
 *.log
 .vkr_puml_git_cache/
+AGENTS.md
